@@ -1,4 +1,4 @@
-from rigol_ds1054z import rigol_ds1054z
+from RigolDS1054Z import RigolDS1054Z
 import time
 #import smbus
 
@@ -9,7 +9,7 @@ import time
 #  to demonstrate triggering on SDA data (you don't need a slave device,
 #  the scope is just observing the master write out to the bus)
 
-scope = rigol_ds1054z('TCPIP::192.168.0.99::INSTR')
+scope = RigolDS1054Z('TCPIP::192.168.0.99::INSTR')
 scope.print_info()
 scope.reset()
 scope.setup_channel(channel=1,on=1,offset_divs=-4, volts_per_div=.5)

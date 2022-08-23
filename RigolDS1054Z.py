@@ -5,19 +5,19 @@ import re
 import csv
 from math import floor, log10
 
-class rigol_dg992:
+class RigolDS1054Z:
 	
 	# Constructor
 	def __init__(self, resource, debug=False):
 		resources = visa.ResourceManager('@py')
 		# insert your device here
 		print(resources.list_resources()) #will show you the USB resource to put below
-		self.fgen = resources.open_resource(resource)
+		self.oscilloscope = resources.open_resource(resource)
 		self.debug = debug
 
 	def print_info(self):
-		self.fgen.write('*IDN?')
-		fullreading = self.fgen.read_raw()
+		self.oscilloscope.write('*IDN?')
+		fullreading = self.oscilloscope.read_raw()
 		readinglines = fullreading.splitlines()
 		print("Scope information: {0}".format(readinglines[0]))
 		time.sleep(2)
@@ -96,8 +96,8 @@ class rigol_dg992:
 		return "%.4gE%s" % (a,b)
 
 	def get_measurement(self, channel=1, meas_type=max_voltage):
-		self.fgen.write(':MEAS:ITEM? ' + meas_type.command + ',CHAN' + str(channel))
-		fullreading = self.fgen.read_raw()
+		self.oscilloscope.write(':MEAS:ITEM? ' + meas_type.command + ',CHAN' + str(channel))
+		fullreading = self.oscilloscope.read_raw()
 		readinglines = fullreading.splitlines()
 		if (meas_type.return_type == 'float'):
 			reading = float(readinglines[0])
@@ -116,37 +116,37 @@ class rigol_dg992:
 		return reading
 	
 	# if no filename is provided, the timestamp will be the filename
-	# def write_screen_capture(self, filename=''):
-	# 	self.fgen.write(':DISP:DATA? ON,OFF,PNG')
-	# 	raw_data = self.fgen.read_raw()[11:] # strip off first 11 bytes
-	# 	# save image file
-	# 	if (filename == ''):
-	# 		filename = "rigol_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") +".png"
-	# 	fid = open(filename, 'wb')
-	# 	fid.write(raw_data)
-	# 	fid.close()
-	# 	print ("Wrote screen capture to filename " + '\"' + filename + '\"')
-	# 	time.sleep(5)
+	def write_screen_capture(self, filename=''):
+		self.oscilloscope.write(':DISP:DATA? ON,OFF,PNG')
+		raw_data = self.oscilloscope.read_raw()[11:] # strip off first 11 bytes
+		# save image file
+		if (filename == ''):
+			filename = "rigol_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") +".png"
+		fid = open(filename, 'wb')
+		fid.write(raw_data)
+		fid.close()
+		print ("Wrote screen capture to filename " + '\"' + filename + '\"')
+		time.sleep(5)
 		
 	def close(self):
-		self.fgen.close()
-		print("Closed USB session to fgen")
+		self.oscilloscope.close()
+		print("Closed USB session to oscilloscope")
 		
 	def reset(self):
-		self.fgen.write('*RST')
-		print("Reset fgen")
+		self.oscilloscope.write('*RST')
+		print("Reset oscilloscope")
 		time.sleep(8)
 		
 	# probe should either be 10.0 or 1.0, per the setting on the physical probe
-	def setup_channel(self, channel=1, on=1, impedance='INF', polarity='NORM'):
+	def setup_channel(self, channel=1, on=1, offset_divs=0.0, volts_per_div=1.0, probe=10.0):
 		if (on == 1):
-			self.fgen.write(':OUTP' + str(channel) + ':STAT ' + 'ON')
-			self.fgen.write(':OUTP' + str(channel) + ':IMP ' + str(impedance))
-			self.fgen.write(':OUTP' + str(channel) + ':POL ' + str(polarity))
-
-			print ("Turned on CH" + str(channel) + ", impedance is " + str(impedance) + " polarity is " + str(polarity))
+			self.oscilloscope.write(':CHAN' + str(channel) + ':DISP ' + 'ON')
+			self.oscilloscope.write(':CHAN' + str(channel) + ':SCAL ' + str(volts_per_div))
+			self.oscilloscope.write(':CHAN' + str(channel) + ':OFFS ' + str(offset_divs*volts_per_div))
+			self.oscilloscope.write(':CHAN' + str(channel) + ':PROB ' + str(probe))
+			print ("Turned on CH" + str(channel) + ", position is " + str(offset_divs) + " divisions from center, " + str(volts_per_div) + " volts/div, scope is " + str(probe) + "x")
 		else:
-			self.fgen.write(':CHAN' + str(channel) + ':DISP OFF')
+			self.oscilloscope.write(':CHAN' + str(channel) + ':DISP OFF')
 			print ("Turned off channel " + str(channel))
 	
 	def val_and_unit_to_real_val(self, val_with_unit='1s'):
@@ -167,20 +167,20 @@ class rigol_dg992:
 	# remember to always use lowercase time_per_div units, the regex look for lowercase
 	def setup_timebase(self, time_per_div='1ms', delay='1ms'):
 		time_per_div_real = self.val_and_unit_to_real_val(time_per_div)
-		self.fgen.write(':TIM:MAIN:SCAL ' + str(time_per_div_real))
+		self.oscilloscope.write(':TIM:MAIN:SCAL ' + str(time_per_div_real))
 		print ("Timebase was set to " + time_per_div + " per division")
 		delay_real = self.val_and_unit_to_real_val(delay)
-		self.fgen.write(':TIM:MAIN:OFFS ' + str(delay_real))
+		self.oscilloscope.write(':TIM:MAIN:OFFS ' + str(delay_real))
 	
 	# remember to always use lowercase level units, the regex look for lowercase
 	def setup_trigger(self, channel=1, slope_pos=1, level='100mv'):
 		level_real = self.val_and_unit_to_real_val(level)
-		self.fgen.write(':TRIG:EDG:SOUR CHAN' + str(channel))
+		self.oscilloscope.write(':TRIG:EDG:SOUR CHAN' + str(channel))
 		if (slope_pos == 0):
-			self.fgen.write(':TRIG:EDG:SLOP NEG')
+			self.oscilloscope.write(':TRIG:EDG:SLOP NEG')
 		else:
-			self.fgen.write(':TRIG:EDG:SLOP POS')
-		self.fgen.write(':TRIG:EDG:LEV ' + str(level_real))
+			self.oscilloscope.write(':TRIG:EDG:SLOP POS')
+		self.oscilloscope.write(':TRIG:EDG:LEV ' + str(level_real))
 		if (slope_pos == 1):
 			print ("Triggering on CH" + str(channel) + " positive edge with level of " + level)
 		else:
@@ -191,28 +191,28 @@ class rigol_dg992:
 	# position_divs is the number of division (from bottom) to position the decode
 	def setup_i2c_decode(self, decode_channel=1, on=1, sda_channel=1, scl_channel=2, encoding='HEX', position_divs=1.0):
 		if (on == 0):
-			self.fgen.write(':DEC' + str(decode_channel) + ':CONF:LINE OFF')
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':CONF:LINE OFF')
 		else:
-			self.fgen.write(':DEC' + str(decode_channel) + ':MODE IIC')
-			self.fgen.write(':DEC' + str(decode_channel) + ':DISP ON')
-			self.fgen.write(':DEC' + str(decode_channel) + ':FORM ' + encoding)
-			self.fgen.write(':DEC' + str(decode_channel) + ':POS ' + str(400-position_divs*50))
-			self.fgen.write(':DEC' + str(decode_channel) + ':THRE AUTO')
-			self.fgen.write(':DEC' + str(decode_channel) + ':CONF:LINE ON')
-			self.fgen.write(':DEC' + str(decode_channel) + ':IIC:CLK CHAN' + str(scl_channel))
-			self.fgen.write(':DEC' + str(decode_channel) + ':IIC:DATA CHAN' + str(sda_channel))
-			self.fgen.write(':DEC' + str(decode_channel) + ':IIC:ADDR RW')
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':MODE IIC')
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':DISP ON')
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':FORM ' + encoding)
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':POS ' + str(400-position_divs*50))
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':THRE AUTO')
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':CONF:LINE ON')
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':IIC:CLK CHAN' + str(scl_channel))
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':IIC:DATA CHAN' + str(sda_channel))
+			self.oscilloscope.write(':DEC' + str(decode_channel) + ':IIC:ADDR RW')
 
 	def single_trigger(self):
-		self.fgen.write(':SING')
+		self.oscilloscope.write(':SING')
 		time.sleep(3)
 		
 	def force_trigger(self):
-		self.fgen.write(':TFOR')
+		self.oscilloscope.write(':TFOR')
 		time.sleep(3)
 		
 	def run_trigger(self):
-		self.fgen.write(':RUN')
+		self.oscilloscope.write(':RUN')
 		time.sleep(3)
 		
 	# only allowed values are 6e3, 6e4, 6e5, 6e6, 12e6 for single channels
@@ -220,16 +220,16 @@ class rigol_dg992:
 	# only allowed values are 3e3, 3e4, 3e5, 3e6, 6e6  for 3 or 4 channels
 	# the int conversion is needed for scientific notation values
 	def setup_mem_depth(self, memory_depth=12e6):
-		self.fgen.write(':ACQ:MDEP ' + str(int(memory_depth)))
+		self.oscilloscope.write(':ACQ:MDEP ' + str(int(memory_depth)))
 		print("Acquire memory depth set to {0} samples".format(memory_depth))
 
 	def write_waveform_data(self, channel=1, filename=''):
-		self.fgen.write(':WAV:SOUR: CHAN' + str(channel))
+		self.oscilloscope.write(':WAV:SOUR: CHAN' + str(channel))
 		time.sleep(1)
-		self.fgen.write(':WAV:MODE NORM')
-		self.fgen.write(':WAV:FORM ASC')
-		self.fgen.write(':ACQ:MDEP?')
-		fullreading = self.fgen.read_raw()
+		self.oscilloscope.write(':WAV:MODE NORM')
+		self.oscilloscope.write(':WAV:FORM ASC')
+		self.oscilloscope.write(':ACQ:MDEP?')
+		fullreading = self.oscilloscope.read_raw()
 		readinglines = fullreading.splitlines()
 		mdepth = int(readinglines[0])
 		num_reads = int((mdepth / 15625) +1)
@@ -238,8 +238,8 @@ class rigol_dg992:
 		fid = open(filename, 'wb')
 		print ("Started saving waveform data for channel " + str(channel) + " " + str(mdepth) + " samples to filename " + '\"' + filename + '\"')
 		for read_loop in range(0,num_reads):
-			self.fgen.write(':WAV:DATA?')
-			fullreading = self.fgen.read_raw()
+			self.oscilloscope.write(':WAV:DATA?')
+			fullreading = self.oscilloscope.read_raw()
 			readinglines = fullreading.splitlines()
 			reading = readinglines[0] + b'\n'
 			reading = reading.replace(b',', b'\n')
@@ -247,15 +247,15 @@ class rigol_dg992:
 		fid.close()
 
 	def write_scope_settings_to_file(self, filename=''):
-		self.fgen.write(':SYST:SET?')
-		raw_data = self.fgen.read_raw()[11:] # strip off first 11 bytes
+		self.oscilloscope.write(':SYST:SET?')
+		raw_data = self.oscilloscope.read_raw()[11:] # strip off first 11 bytes
 		
 		if (filename == ''):
 			filename = "rigol_settings_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") +".stp"
 		fid = open(filename, 'wb')
 		fid.write(raw_data)
 		fid.close()
-		print ("Wrote fgen settings to filename " + '\"' + filename + '\"')
+		print ("Wrote oscilloscope settings to filename " + '\"' + filename + '\"')
 		time.sleep(5)
 		
 	def restore_scope_settings_from_file(self, filename=''):
@@ -270,7 +270,7 @@ class rigol_dg992:
 				#convert to a list that write_binary_values can iterate
 				for x in range(0,len(fileContent)-1):
 					valList.append(ord(fileContent[x]))
-				self.fgen.write_binary_values(':SYST:SET ', valList, datatype='B', is_big_endian=True) 
-			print ("Wrote fgen settings to scope")
+				self.oscilloscope.write_binary_values(':SYST:SET ', valList, datatype='B', is_big_endian=True) 
+			print ("Wrote oscilloscope settings to scope")
 			time.sleep(8)
 
