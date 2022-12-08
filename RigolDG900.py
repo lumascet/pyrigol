@@ -1,12 +1,7 @@
-from math import pi
-from tkinter.font import NORMAL
-import wave
-import pyvisa as visa
-import datetime
 import time
 import re
-import csv
-from math import floor, log10
+from math import floor, log10, pi
+import pyvisa as visa
 
 
 class RigolDG900:
@@ -23,8 +18,8 @@ class RigolDG900:
         self.fgen.write('*IDN?')
         fullreading = self.fgen.read_raw()
         readinglines = fullreading.splitlines()
-        print("Scope information: {0}".format(readinglines[0]))
-        time.sleep(2)
+        print("Gen information: {0}".format(readinglines[0]))
+        # time.sleep(2)
 
     def powerise10(self, x):
         """ Returns x as a*10**b with 0 <= a < 10"""
@@ -224,13 +219,16 @@ class RigolDG900:
     def reset(self):
         self.fgen.write('*RST')
         print("Reset fgen")
-        time.sleep(8)
 
     def setup_output(self, channel=1, impedance=limit.INFINITY, polarity=polarity.NORMAL):
         self.fgen.write(':OUTP' + str(channel) + ':IMP ' + str(impedance))
         self.fgen.write(':OUTP' + str(channel) + ':POL ' + str(polarity))
         print("CH" + str(channel) + ", impedance is " +
               str(impedance) + " polarity is " + str(polarity))
+
+    def channel_align(self, channel=1):
+        self.fgen.write(f':SOUR{channel}:PHAS:SYNC')
+        print(f"Alligned other ouput to Channel {channel} ")
 
     def output_state(self, channel=1, state=1):
         if (state == 1):
@@ -252,38 +250,37 @@ class RigolDG900:
     def setup_source(self, source=1, shape=waveform.SINUSOID, frequency='1Hz', amplitude='5Vpp', offset='0V', duty=50.0, period='0ms', phase='0.0deg', freq_prbs='2kbps', sample_rate='2kbps'):
         match(shape):
             case self.waveform.NOISE | self.waveform.RS232:
-                self.fgen.write(':SOUR{0}:APPL:{1} {2},{3}'.format(
-                    source, shape, amplitude, offset))
-                print('Source set up NUMBER: {0}, SHAPE: {1},\t AMPLITUDE: {2},\t OFFSET: {3}'.format(
-                    source, shape, amplitude, offset))
+                self.fgen.write(
+                    f':SOUR{source}:APPL:{shape} {amplitude},{offset}')
+                print(
+                    f'Source set up NUMBER: {source}, SHAPE: {shape},\t AMPLITUDE: {amplitude},\t OFFSET: {offset}')
 
             case self.waveform.DC | self.waveform.DUALTONE:
-                self.fgen.write(':SOUR{0}:APPL:{1} {2},{3},{4}'.format(
-                    source, shape, frequency, amplitude, offset))
-                print('Source set up NUMBER: {0}, SHAPE: {1},\t AMPLITUDE: {2},\t FREQUENCY: {3},\t OFFSET: {4}'.format(
-                    source, shape, amplitude, frequency, offset))
+                self.fgen.write(
+                    f':SOUR{source}:APPL:{shape} {frequency},{amplitude},{offset}')
+                print(
+                    f'Source set up NUMBER: {source}, SHAPE: {shape},\t AMPLITUDE: {amplitude},\t FREQUENCY: {frequency},\t OFFSET: {offset}')
 
             case self.waveform.HARMONIC | self.waveform.PULSE | self.waveform.RAMP | self.waveform.SINUSOID | self.waveform.SQUARE | self.waveform.USER:
-                self.fgen.write(':SOUR{0}:APPL:{1} {2},{3},{4},{5}'.format(
-                    source, shape, frequency, amplitude, offset, self.__val_and_unit_to_real_val(phase)))
-                print('Source set up NUMBER: {0}, SHAPE: {1},\t AMPLITUDE: {2},\t FREQUENCY: {3},\t OFFSET: {4},\t PHASE: {5}'.format(
-                    source, shape, amplitude, frequency, offset, self.__val_and_unit_to_real_val(phase)))
+                self.fgen.write(
+                    f':SOUR{source}:APPL:{shape} {frequency},{amplitude},{offset},{self.__val_and_unit_to_real_val(phase)}')
+                print(
+                    f'Source set up NUMBER: {source}, SHAPE: {shape},\t AMPLITUDE: {amplitude},\t FREQUENCY: {frequency},\t OFFSET: {offset},\t PHASE: {phase}')
 
             case self.waveform.SEQUENCE:
-                self.fgen.write(':SOUR{0}:APPL:{1} {2},{3},{4},{5}'.format(
-                    source, shape, sample_rate, amplitude, offset, phase))
-                print('Source set up NUMBER: {0}, SHAPE: {1},\t AMPLITUDE: {2},\t OFFSET: {3},\t PHASE: {4},\t Samplerate: {5}'.format(
-                    source, shape, amplitude, offset, phase, sample_rate))
+                self.fgen.write(
+                    f':SOUR{source}:APPL:{shape} {sample_rate},{amplitude},{offset},{phase}')
+                print(
+                    f'Source set up NUMBER: {source}, SHAPE: {shape},\t AMPLITUDE: {amplitude},\t OFFSET: {offset},\t PHASE: {phase},\t Samplerate: {sample_rate}')
 
             case self.waveform.PRBS:
-                self.fgen.write(':SOUR{0}:APPL:{1} {2},{3},{4}'.format(
-                    source, shape, freq_prbs, amplitude, offset))
-                print('Source set up NUMBER: {0}, SHAPE: {1},\t AMPLITUDE: {2},\t FREQUENCY: {3},\t OFFSET: {4},\t '.format(
-                    source, shape, amplitude, freq_prbs, offset, sample_rate))
+                self.fgen.write(
+                    f':SOUR{source}:APPL:{shape} {freq_prbs},{amplitude},{offset}')
+                print(
+                    'Source set up NUMBER: {0}, SHAPE: {shape},\t AMPLITUDE: {amplitude},\t FREQUENCY: {freq_prbs},\t OFFSET: {offset},\t ')
 
             case others:
                 self.setWaveform(source, shape)
-                time.sleep(2)
                 self.setFrequency(source, frequency)
                 self.setVoltage(source, amplitude, offset)
                 self.setPhase(source, self.__val_and_unit_to_real_val(phase))
@@ -293,25 +290,24 @@ class RigolDG900:
                             str(self.__val_and_unit_to_real_val(duty)))
 
     def setWaveform(self, source=1, shape=waveform.SINUSOID):
-        self.fgen.write(':SOUR{0}:FUNC:SHAP {1}'.format(source, shape))
-        print('Source set up NUMBER: {0}, SHAPE: {1}'.format(
-            source, shape))
+        self.fgen.write(f':SOUR{source}:FUNC:SHAP {shape}')
+        print(f'Source set up NUMBER: {source}, SHAPE: {shape}')
 
     def setFrequency(self, source=1, frequency='1Hz'):
-        self.fgen.write(':SOUR{0}:FREQ {1}'.format(source, frequency))
-        print('Source set up NUMBER: {0}, FREQUENCY: {1}'.format(
-            source, frequency))
+        self.fgen.write(f':SOUR{source}:FREQ {frequency}')
+        print(f'Source set up NUMBER: {source}, FREQUENCY: {frequency}')
 
     def setVoltage(self, source=1, amplitude='1V', offset='0V'):
-        self.fgen.write(':SOUR{0}:VOLT:OFFS {1}'.format(source, offset))
-        self.fgen.write(':SOUR{0}:VOLT {1}'.format(source, amplitude))
-        print('Source set up NUMBER: {0}, AMPLITUDE: {1},\t OFFSET: {2}'.format(
-            source, amplitude, offset))
+        self.fgen.write(
+            f':SOUR{source}:VOLT:OFFS {offset}'.format(source, offset))
+        self.fgen.write(
+            f':SOUR{source}:VOLT {amplitude}'.format(source, amplitude))
+        print(
+            f'Source set up NUMBER: {source}, AMPLITUDE: {amplitude},\t OFFSET: {offset}')
 
     def setPhase(self, source=1, phase='0deg'):
-        self.fgen.write(':SOUR{0}:PHAS {1}'.format(source, phase))
-        print('Source set up NUMBER: {0}, PHASE: {1}'.format(
-            source, phase))
+        self.fgen.write(':SOUR{source}:PHAS {phase}')
+        print('Source set up NUMBER: {source}, PHASE: {phase}')
 
     def __val_and_unit_to_real_val(self, val_with_unit='1s'):
         # mostly not needed as dg900 understands units (except radians)

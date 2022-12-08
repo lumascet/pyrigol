@@ -1,5 +1,7 @@
 # Python Rigol control and measurement classes
+
 ## Supported Devices
+
 ### DS1054Z class
 
 Ported to work for python 3.10+. See [test_ds.py](test_ds.py) for an example file.
@@ -20,14 +22,26 @@ See [test_dg.py](test_dg.py) for an example file.
 ## Installation
 
 Install required pip packages
+
 ```shell
  python3 -m pip install -r requirements.txt
 ```
+
 and then just run
+
 ```shell
  python3 test_ds.py
 ```
+
 or
+
 ```shell
  python3 test_dg.py
 ```
+
+## Combined and automated measurements
+
+See ```test_combined.py``` for a automated bode plot measurement of electric circuits.
+
+Below you can see the bode plots between a modeled low pass filter (blue) and the real measured LPF(R=1MOhm, C=100nF) (orange). The output voltage from the current generator has dropped due to the load, therefore resulting in a lower unity gain.
+![](BodePlot_lowpass.png)
