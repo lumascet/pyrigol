@@ -3,6 +3,8 @@ import datetime
 import time
 import re
 from math import floor, log10
+import numpy as np
+from rich.progress import track
 
 
 class RigolDS1054Z:
@@ -207,11 +209,23 @@ class RigolDS1054Z:
             self.oscilloscope.write(':CHAN' + str(channel) + ':DISP OFF')
             print("Turned off channel " + str(channel))
 
+    def get_scale(self, channel=1):
+        return float(self.oscilloscope.query(f':CHAN{channel}:SCAL?'))
+
+    def get_y_inc(self):
+        return float(self.oscilloscope.query(f':WAV:YINC?'))
+
+    def get_y_origin(self):
+        return int(self.oscilloscope.query(f':WAV:YOR?'))
+
+    def get_y_ref(self):
+        return int(self.oscilloscope.query(f':WAV:YREF?'))
+
     def val_and_unit_to_real_val(self, val_with_unit='1s'):
         if isinstance(val_with_unit, float) or isinstance(val_with_unit, int):
             return val_with_unit
         number = int(re.search(r"([0-9]+)", val_with_unit).group(0))
-        unit = re.search(r"([a-z]+)", val_with_unit).group(0).lower()
+        unit = re.search(r"([a-zA-Z]+)", val_with_unit).group(0).lower()
         if (unit == 's' or unit == 'v'):
             real_val_no_units = number
         elif (unit == 'ms' or unit == 'mv'):
@@ -275,15 +289,15 @@ class RigolDS1054Z:
 
     def single_trigger(self):
         self.oscilloscope.write(':SING')
-        time.sleep(3)
+        time.sleep(0.1)
 
     def force_trigger(self):
         self.oscilloscope.write(':TFOR')
-        time.sleep(3)
+        time.sleep(0.1)
 
     def run_trigger(self):
         self.oscilloscope.write(':RUN')
-        time.sleep(3)
+        time.sleep(0.1)
 
     # only allowed values are 6e3, 6e4, 6e5, 6e6, 12e6 for single channels
     # only allowed values are 6e3, 6e4, 6e5, 6e6, 12e6 for   dual channels
@@ -293,31 +307,96 @@ class RigolDS1054Z:
         self.oscilloscope.write(':ACQ:MDEP ' + str(int(memory_depth)))
         print("Acquire memory depth set to {0} samples".format(memory_depth))
 
-    def write_waveform_data(self, channel=1, filename=''):
-        self.oscilloscope.write(':WAV:SOUR: CHAN' + str(channel))
+    def get_waveform_data_ascii(self, channel=1, filename=''):
+        print('WARNING: Ascii method is 8 times slower, try using the method "get_waveform_data_uint8()" in combination with "scale_waveform_uint8()"')
+        self.oscilloscope.write(':STOP')
+        self.oscilloscope.write(f':WAV:SOUR CHAN{channel}')
         time.sleep(1)
-        self.oscilloscope.write(':WAV:MODE NORM')
+        self.oscilloscope.write(':WAV:MODE RAW')
         self.oscilloscope.write(':WAV:FORM ASC')
         self.oscilloscope.write(':ACQ:MDEP?')
         fullreading = self.oscilloscope.read_raw()
         readinglines = fullreading.splitlines()
         mdepth = int(readinglines[0])
-        num_reads = int((mdepth / 15625) + 1)
-        if (filename == ''):
-            filename = "rigol_waveform_data_channel_" + \
-                str(channel) + "_" + \
-                datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
-        fid = open(filename, 'wb')
-        print("Started saving waveform data for channel " + str(channel) +
-              " " + str(mdepth) + " samples to filename " + '\"' + filename + '\"')
-        for read_loop in range(0, num_reads):
+        # transmission length can be higher (131072 instead of 15625) than rated in the documentation
+        num_reads = int((mdepth / 131072))
+        buffer = np.zeros(mdepth)
+
+        #channel_adress_offset = num_reads * 131072 * (channel-1)
+
+        for i in track(range(0, num_reads), description="Downloading Waveform..."):
+            start = 1+i*131072
+            stop = (1+i)*131072
+
+            self.oscilloscope.write(f':WAV:STAR {start}')
+            self.oscilloscope.write(f':WAV:STOP {stop}')
             self.oscilloscope.write(':WAV:DATA?')
             fullreading = self.oscilloscope.read_raw()
-            readinglines = fullreading.splitlines()
-            reading = readinglines[0] + b'\n'
-            reading = reading.replace(b',', b'\n')
-            fid.write(reading[11:])
-        fid.close()
+            array = fullreading[11:-1]
+            datapoints = np.fromstring(array, sep=',')
+            buffer[start-1:stop] = datapoints
+
+        return buffer
+
+    def get_waveform_data_uint8(self, channel=1, filename=''):
+        self.oscilloscope.write(':STOP')
+        self.oscilloscope.write(f':WAV:SOUR CHAN{channel}')
+        time.sleep(1)
+        self.oscilloscope.write(':WAV:MODE RAW')
+        self.oscilloscope.write(':WAV:FORM BYTE')
+        self.oscilloscope.write(':ACQ:MDEP?')
+        fullreading = self.oscilloscope.read_raw()
+        readinglines = fullreading.splitlines()
+        mdepth = int(readinglines[0])
+        num_reads = int((mdepth / 250000))
+        buffer = np.zeros(mdepth, dtype=np.uint8)
+
+        #channel_adress_offset = num_reads * 250000 * (channel-1)
+
+        for i in track(range(0, num_reads), description=f"Downloading Waveform Channel {channel}..."):
+            start = 1+i*250000
+            stop = (1+i)*250000
+            self.oscilloscope.write(f':WAV:STAR {start}')
+            self.oscilloscope.write(f':WAV:STOP {stop}')
+            self.oscilloscope.write(':WAV:DATA?')
+            fullreading = self.oscilloscope.read_raw()
+            array = fullreading[11:-1]
+            datapoints = np.frombuffer(array, dtype=np.uint8)
+            buffer[start-1:stop] = datapoints
+
+        return buffer
+
+    def scale_waveform_uint8(self, uint8_array):
+        inc = self.get_y_inc()
+        org = self.get_y_origin()
+        ref = self.get_y_ref()
+        return (np.array(uint8_array, dtype=np.float64) - org - ref) * inc
+
+    # def write_waveform_data(self, channel=1, filename=''):
+    #     self.oscilloscope.write(':WAV:SOUR: CHAN' + str(channel))
+    #     time.sleep(1)
+    #     self.oscilloscope.write(':WAV:MODE NORM')
+    #     self.oscilloscope.write(':WAV:FORM ASC')
+    #     self.oscilloscope.write(':ACQ:MDEP?')
+    #     fullreading = self.oscilloscope.read_raw()
+    #     readinglines = fullreading.splitlines()
+    #     mdepth = int(readinglines[0])
+    #     num_reads = int((mdepth / 15625) + 1)
+    #     if (filename == ''):
+    #         filename = "rigol_waveform_data_channel_" + \
+    #             str(channel) + "_" + \
+    #             datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
+    #     fid = open(filename, 'wb')
+    #     print("Started saving waveform data for channel " + str(channel) +
+    #           " " + str(mdepth) + " samples to filename " + '\"' + filename + '\"')
+    #     for read_loop in range(0, num_reads):
+    #         self.oscilloscope.write(':WAV:DATA?')
+    #         fullreading = self.oscilloscope.read_raw()
+    #         readinglines = fullreading.splitlines()
+    #         reading = readinglines[0] + b'\n'
+    #         reading = reading.replace(b',', b'\n')
+    #         fid.write(reading[11:])
+    #     fid.close()
 
     def write_scope_settings_to_file(self, filename=''):
         self.oscilloscope.write(':SYST:SET?')

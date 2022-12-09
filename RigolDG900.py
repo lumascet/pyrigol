@@ -1,3 +1,4 @@
+import datetime
 import time
 import re
 from math import floor, log10, pi
@@ -42,6 +43,16 @@ class RigolDG900:
         a = a * 10**(b % 3)
         b = b - b % 3
         return "%.4gE%s" % (a, b)
+
+    class scale:
+        LINEAR = "LIN"
+        LOGARITHMIC = "LOG"
+        STEP = "STE"
+
+    class trigger:
+        INTERNAL = "INT",
+        EXTERNAL = "EXT",
+        MANUAL = "MAN"
 
     class waveform:
         SINUSOID = "SIN"
@@ -212,6 +223,10 @@ class RigolDG900:
         NORMAL = "NORM"
         INVERTED = "INV"
 
+    class slope:
+        POSITIVE = "POS",
+        NEGATIVE = "NEG"
+
     def close(self):
         self.fgen.close()
         print("Closed USB session to fgen")
@@ -219,6 +234,7 @@ class RigolDG900:
     def reset(self):
         self.fgen.write('*RST')
         print("Reset fgen")
+        time.sleep(4)
 
     def setup_output(self, channel=1, impedance=limit.INFINITY, polarity=polarity.NORMAL):
         self.fgen.write(':OUTP' + str(channel) + ':IMP ' + str(impedance))
@@ -289,6 +305,43 @@ class RigolDG900:
             self.fgen.write(':SOUR' + str(source) + ':FUNC:SQU:DCYC ' +
                             str(self.__val_and_unit_to_real_val(duty)))
 
+    def setSweep(self, source=1, state=1, starting_frequency=0, stop_frequency=0, center_frequency=0, frequency_span=0, sweep_time=0, return_time=0, scale_type=scale.LINEAR, steps=0, trigger_source=trigger.INTERNAL, trigger_slope=slope.POSITIVE):
+        self.fgen.write(f':SOUR{source}:SWE:STAT {state}')
+        time.sleep(0.1)
+        if starting_frequency and stop_frequency:
+            self.fgen.write(
+                f':SOUR{source}:FREQ:STAR {starting_frequency}')
+            time.sleep(0.1)
+            self.fgen.write(f':SOUR{source}:FREQ:STOP {stop_frequency}')
+            time.sleep(0.1)
+        elif center_frequency and frequency_span:
+            self.fgen.write(f':SOUR{source}:FREQ:CENT {center_frequency}')
+            time.sleep(0.1)
+            self.fgen.write(f':SOUR{source}:FREQ:SPAN {frequency_span}')
+            time.sleep(0.1)
+        if return_time:
+            self.fgen.write(f':SOUR{source}:SWE:RTIM {return_time}')
+            time.sleep(0.1)
+        if sweep_time:
+            self.fgen.write(f':SOUR{source}:SWE:TIME {sweep_time}')
+            time.sleep(0.1)
+        if steps:
+            self.fgen.write(f':SOUR{source}:SWE:STEP {steps}')
+            time.sleep(0.1)
+
+        self.fgen.write(f':SOUR{source}:SWE:TRIG:SOUR {trigger_source}')
+        time.sleep(0.1)
+        if trigger_source == self.trigger.EXTERNAL:
+            self.fgen.write(f':SOUR{source}:SWE:TRIG:SLOP {trigger_slope}')
+            time.sleep(0.1)
+
+        self.fgen.write(f':SOUR{source}:SWE:SPAC {scale_type}')
+        time.sleep(0.1)
+
+    def triggerSweep(self, source=1):
+        # self.fgen.write(f':SOUR{source}:SWE:TRIG') # not working for me
+        self.fgen.write(f':TRIG{source}')
+
     def setWaveform(self, source=1, shape=waveform.SINUSOID):
         self.fgen.write(f':SOUR{source}:FUNC:SHAP {shape}')
         print(f'Source set up NUMBER: {source}, SHAPE: {shape}')
@@ -341,6 +394,20 @@ class RigolDG900:
 
     def beep(self):
         self.fgen.write(':SYST:BEEP:IMM')
+
+    # somehow screen capture is not working
+    def write_screen_capture(self, filename=''):
+        self.fgen.write(':HCOP:SDUM:DATA:FORM PNG')
+        # strip off first 9 bytes
+        raw_data = self.fgen.read_raw()[9:]
+        # save image file
+        if (filename == ''):
+            filename = "rigol_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".png"
+        fid = open(filename, 'wb')
+        fid.write(raw_data)
+        fid.close()
+        print("Wrote screen capture to filename " + '\"' + filename + '\"')
+        time.sleep(5)
 
     # def write_waveform_data(self, channel=1, filename=''):
     #     self.fgen.write(':WAV:SOUR: CHAN' + str(channel))
