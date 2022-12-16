@@ -45,7 +45,7 @@ See ```test_combined.py``` for a automated bode plot measurement of electric cir
 
 Below you can see the bode plots between a modeled low pass filter (blue) and the real measured LPF(R=1MOhm, C=100nF) (orange). The output voltage from the current generator has dropped due to the input impedance of the oscilloscope(1MOhm), resulting in half the measured voltage.
 
-![](screenshots/BodePlot_lowpass.png)
+![](screenshots/BodePlot_RC_Lowpass.png)
 
 ### Bode sweep measurement
 
