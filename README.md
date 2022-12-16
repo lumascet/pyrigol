@@ -2,7 +2,7 @@
 
 ## Supported Devices
 
-### DS1054Z class
+### DS1000 class
 
 Ported to work for python 3.10+. See [test_ds.py](test_ds.py) for an example file.
 
@@ -10,9 +10,9 @@ Ported to work for python 3.10+. See [test_ds.py](test_ds.py) for an example fil
 
 [Programming Guide](https://beyondmeasure.rigoltech.com/acton/attachment/1579/f-0386/1/-/-/-/-/DS1000Z_Programming%20Guide_EN.pdf)
 
-### DG800/DG900 class
+### DG900 class
 
-Should support all DG8xx and DG9xx like I used DG992 to test the script, as they are based on the same Hardware. You can connect a cheap USB/LAN adapter to connect via your local network.
+Should support all DG8xx and DG9xx like I used DG992 to test the script, as they are based on the same Hardware. You can connect a cheap USB/LAN adapter to connect via your local network. The USB input should also work.
 
 Added class to apply basic waveforms via the python script. Some advanced features like sync or custom waveforms are still not done yet.
 See [test_dg.py](test_dg.py) for an example file.
