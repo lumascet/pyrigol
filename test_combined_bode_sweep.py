@@ -2,11 +2,19 @@ from math import pi
 import os
 import time
 import numpy as np
-from RigolDG900 import RigolDG900
-from RigolDS1054Z import RigolDS1054Z
+from Rigol.DG900 import RigolDG992
+from Rigol.DS1000 import RigolDS1054Z
 import matplotlib.pyplot as plt
 import control
 import datetime
+
+# Frequency sweep measurement
+# If no curve acquired, check if channel 2 is connected
+# Connect CH1 of signal gen to oscilloscope CH1 directly and CH2 as test port
+
+DO_MEASUREMENT_CYCLE = True
+PLOT_RESULTS = True
+LOAD_MEASUREMENT_TIMESTAMP = '2022-12-09_15-27-09'
 
 
 def init_scope(scope):
@@ -53,57 +61,53 @@ def save_waveforms(data_in, data_out):
         np.save(f, data_out)
 
 
-DO_MEASUREMENT_CYCLE = False
-PLOT_RESULTS = True
-LOAD_MEASUREMENT_TIMESTAMP = '2022-12-09_15-27-09'
+scope = RigolDS1054Z('TCPIP::192.168.0.99::INSTR',
+                     RigolDG992.loglevel.WARNING)
+fgen = RigolDG992('TCPIP::192.168.0.109::INSTR',
+                  RigolDG992.loglevel.WARNING)
 
-if __name__ == '__main__':
+if DO_MEASUREMENT_CYCLE:
+    init_scope(scope)
+    init_fgen(fgen)
 
-    scope = RigolDS1054Z('TCPIP::192.168.0.99::INSTR')
-    fgen = RigolDG900('TCPIP::192.168.0.109::INSTR')
+    scope.single_trigger()
+    time.sleep(2)
+    fgen.output_state(1)
+    fgen.triggerSweep(1)
+    time.sleep(12)
 
-    if DO_MEASUREMENT_CYCLE:
-        init_scope(scope)
-        init_fgen(fgen)
+    data_in = scope.get_waveform_data_uint8(channel=1)
+    data_out = scope.get_waveform_data_uint8(channel=2)
 
-        scope.single_trigger()
-        time.sleep(2)
-        fgen.output_state(1)
-        fgen.triggerSweep(1)
-        time.sleep(12)
+    save_waveforms(data_in, data_out)
 
-        data_in = scope.get_waveform_data_uint8(channel=1)
-        data_out = scope.get_waveform_data_uint8(channel=2)
+else:
+    data_in, data_out = load_prev_waveforms(LOAD_MEASUREMENT_TIMESTAMP)
 
-        save_waveforms(data_in, data_out)
+analog_in = scope.scale_waveform_uint8(data_in)
+analog_out = scope.scale_waveform_uint8(data_out)
 
-    else:
-        data_in, data_out = load_prev_waveforms(LOAD_MEASUREMENT_TIMESTAMP)
+if (PLOT_RESULTS):
+    plt.plot(range(len(analog_out)), analog_out)
+    plt.plot(range(len(analog_in)), analog_in)
+    plt.show()
 
-    analog_in = scope.scale_waveform_uint8(data_in)
-    analog_out = scope.scale_waveform_uint8(data_out)
+# TODO Calculate gain and phase diff
 
-    if (PLOT_RESULTS):
-        plt.plot(range(len(analog_out)), analog_out)
-        plt.plot(range(len(analog_in)), analog_in)
-        plt.show()
+# R = 1E6
+# C = 100E-9
 
-    # TODO Calculate gain and phase diff
+# tf = control.tf([1], [R*C, 1])
+# control.bode(tf, Hz=True, dB=True, deg=True)
 
-    # R = 1E6
-    # C = 100E-9
+# plt.tight_layout()
 
-    # tf = control.tf([1], [R*C, 1])
-    # control.bode(tf, Hz=True, dB=True, deg=True)
+# ax1, ax2 = plt.gcf().axes     # get subplot axes
 
-    # plt.tight_layout()
+# plt.sca(ax1)                 # magnitude plot
+# plt.plot(freq_set[g < 10], g[g < 10])
 
-    # ax1, ax2 = plt.gcf().axes     # get subplot axes
+# plt.sca(ax2)                 # phase plot
+# plt.plot(freq_set[pha < 10E2], pha[pha < 10E2])
 
-    # plt.sca(ax1)                 # magnitude plot
-    # plt.plot(freq_set[g < 10], g[g < 10])
-
-    # plt.sca(ax2)                 # phase plot
-    # plt.plot(freq_set[pha < 10E2], pha[pha < 10E2])
-
-    # plt.show()
+# plt.show()

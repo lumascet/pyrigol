@@ -1,4 +1,4 @@
-from RigolDS1054Z import RigolDS1054Z
+from Rigol.DS1000 import RigolDS1054Z
 import time
 #import smbus
 
@@ -12,22 +12,22 @@ import time
 scope = RigolDS1054Z('TCPIP::192.168.0.99::INSTR')
 scope.print_info()
 scope.reset()
-scope.setup_channel(channel=1,on=1,offset_divs=-4, volts_per_div=.5)
-#scope.setup_channel(channel=2,on=1,offset_divs=-2.0,volts_per_div=2.0)
-scope.setup_timebase(time_per_div='10us',delay='10us')
+scope.setup_channel(channel=1, on=1, offset_divs=-4, volts_per_div=.5)
+# scope.setup_channel(channel=2,on=1,offset_divs=-2.0,volts_per_div=2.0)
+scope.setup_timebase(time_per_div='10us', delay='10us')
 scope.setup_mem_depth(memory_depth=120e3)
-scope.setup_trigger(channel=1,slope_pos=1,level='500mv')
+scope.setup_trigger(channel=1, slope_pos=1, level='500mv')
 #scope.setup_i2c_decode(sda_channel=1, scl_channel=2)
 scope.single_trigger()
 # i2c = smbus.SMBus(1)
 # i2c.write_quick(0x50) #
 time.sleep(3)
 for measurement in scope.single_measurement_list:
-	scope.get_measurement(channel=1, meas_type=measurement)
+    scope.get_measurement(channel=1, meas_type=measurement)
 # for measurement in scope.single_measurement_list:
 # 	scope.get_measurement(channel=2, meas_type=measurement)
 scope.get_measurement(channel=1, meas_type=scope.max_voltage)
 scope.write_screen_capture(filename='rigol_i2c_no_slave.png')
-scope.write_waveform_data(channel=1)
-#scope.write_waveform_data(channel=2)
+scope.get_waveform_data_uint8(channel=1)
+# scope.write_waveform_data(channel=2)
 scope.close()

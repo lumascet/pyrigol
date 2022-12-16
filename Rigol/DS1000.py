@@ -1,28 +1,52 @@
 import pyvisa as visa
 import datetime
 import time
-import re
-from math import floor, log10
 import numpy as np
+import logging
 from rich.progress import track
+from Rigol.rigol_util import eng_notation, val_and_unit_to_real_val, CustomLogger
 
 
-class RigolDS1054Z:
+class _RigolDS1000:
 
     # Constructor
-    def __init__(self, resource, debug=False):
-        resources = visa.ResourceManager('@py')
-        # insert your device here
-        # will show you the USB resource to put below
-        print(resources.list_resources())
-        self.oscilloscope = resources.open_resource(resource)
-        self.debug = debug
+    def __init__(self, resource, loglevel=logging.INFO):
+        self.logger = CustomLogger(self.__class__.__name__, loglevel)
+
+        try:
+            resources = visa.ResourceManager('@py')
+            self.device = resources.open_resource(resource)
+        except visa.Error as error:
+            self.logger.critical(error.description)
+            exit(-1)
+
+    def send_command(self, command):
+        self.logger.debug(f'Sent command: {command}')
+        self.device.write(command)
+
+    def read_response(self):
+        buffer = self.device.read_raw()
+        self.logger.debug(f'Got response: {buffer}')
+        return buffer
+
+    def query_command(self, command):
+        buffer = self.device.query(command)
+        filtered_buffer = buffer.replace("\n", "\\n")
+        self.logger.debug(f'Query sent: {command}, got: {filtered_buffer}')
+        return buffer
+
+    class loglevel:
+        INFO = logging.INFO
+        WARNING = logging.WARNING
+        ERROR = logging.ERROR
+        CRITICAL = logging.CRITICAL
+        DEBUG = logging.DEBUG
 
     def print_info(self):
-        self.oscilloscope.write('*IDN?')
-        fullreading = self.oscilloscope.read_raw()
+        self.send_command('*IDN?')
+        fullreading = self.read_response()
         readinglines = fullreading.splitlines()
-        print("Scope information: {0}".format(readinglines[0]))
+        self.logger.info("Scope information: {0}".format(readinglines[0]))
         time.sleep(2)
 
     class measurement:
@@ -119,184 +143,147 @@ class RigolDS1054Z:
     double_measurement_list = [
         rising_phase_ratio, falling_phase_ratio, rising_delay_time, falling_delay_time]
 
-    def powerise10(self, x):
-        """ Returns x as a*10**b with 0 <= a < 10"""
-        if x == 0:
-            return 0, 0
-        Neg = x < 0
-        if Neg:
-            x = -x
-        a = 1.0 * x / 10**(floor(log10(x)))
-        b = int(floor(log10(x)))
-        if Neg:
-            a = -a
-        return a, b
-
-    def eng_notation(self, x):
-        """Return a string representing x in an engineer friendly notation"""
-        a, b = self.powerise10(x)
-        if -3 < b < 3:
-            return "%.4g" % x
-        a = a * 10**(b % 3)
-        b = b - b % 3
-        return "%.4gE%s" % (a, b)
-
     def get_measurement(self, channel=1, channel_compare=2, meas_type=max_voltage):
         if meas_type == self.rising_phase_ratio or meas_type == self.falling_phase_ratio:
-            self.oscilloscope.write(
+            self.send_command(
                 ':MEAS:ITEM? ' + meas_type.command + ',CHAN' + str(channel) + ',CHAN' + str(channel_compare))
         else:
-            self.oscilloscope.write(
+            self.send_command(
                 ':MEAS:ITEM? ' + meas_type.command + ',CHAN' + str(channel))
-        fullreading = self.oscilloscope.read_raw()
+        fullreading = self.read_response()
         readinglines = fullreading.splitlines()
         if (meas_type.return_type == 'float'):
             reading = float(readinglines[0])
             if (meas_type.unit == '%%'):
                 percentage_reading = reading*100
-                print("Channel " + str(channel) + " " + meas_type.name +
-                      " value is {0} %".format(percentage_reading))
+                self.logger.info("Channel " + str(channel) + " " + meas_type.name +
+                                 " value is {0} %".format(percentage_reading))
             else:
-                eng_reading = self.eng_notation(reading)
-                print("Channel " + str(channel) + " " + meas_type.name +
-                      " value is " + eng_reading + " " + meas_type.unit)
+                eng_reading = eng_notation(reading)
+                self.logger.info("Channel " + str(channel) + " " + meas_type.name +
+                                 " value is " + eng_reading + " " + meas_type.unit)
         elif (meas_type.return_type == 'int'):
             reading = int(float(readinglines[0]))
-            print("Channel " + str(channel) + " " + meas_type.name +
-                  " value is {0} ".format(reading) + meas_type.unit)
+            self.logger.info("Channel " + str(channel) + " " + meas_type.name +
+                             " value is {0} ".format(reading) + meas_type.unit)
         else:
             reading = str(readinglines[0])
-            print("Channel " + str(channel) + " " + meas_type.name +
-                  " value is " + reading + " " + meas_type.unit)
+            self.logger.info("Channel " + str(channel) + " " + meas_type.name +
+                             " value is " + reading + " " + meas_type.unit)
         return reading
 
     # if no filename is provided, the timestamp will be the filename
     def write_screen_capture(self, filename=''):
-        self.oscilloscope.write(':DISP:DATA? ON,OFF,PNG')
+        self.send_command(':DISP:DATA? ON,OFF,PNG')
         # strip off first 11 bytes
-        raw_data = self.oscilloscope.read_raw()[11:]
+        raw_data = self.read_response()[11:]
         # save image file
         if (filename == ''):
             filename = "rigol_" + datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".png"
         fid = open(filename, 'wb')
         fid.write(raw_data)
         fid.close()
-        print("Wrote screen capture to filename " + '\"' + filename + '\"')
+        self.logger.info("Wrote screen capture to filename " +
+                         '\"' + filename + '\"')
         time.sleep(5)
 
     def close(self):
-        self.oscilloscope.close()
-        print("Closed USB session to oscilloscope")
+        self.device.close()
+        self.logger.info("Closed USB session to oscilloscope")
 
     def reset(self):
-        self.oscilloscope.write('*RST')
-        print("Reset oscilloscope")
+        self.send_command('*RST')
+        self.logger.warning("Reset oscilloscope")
         time.sleep(8)
 
     # probe should either be 10.0 or 1.0, per the setting on the physical probe
     def setup_channel(self, channel=1, on=1, offset_divs=0.0, volts_per_div=1.0, probe=10.0):
         if (on == 1):
-            self.oscilloscope.write(':CHAN' + str(channel) + ':DISP ' + 'ON')
-            self.oscilloscope.write(
+            self.send_command(':CHAN' + str(channel) + ':DISP ' + 'ON')
+            self.send_command(
                 ':CHAN' + str(channel) + ':PROB ' + str(probe))
-            self.oscilloscope.write(
+            self.send_command(
                 ':CHAN' + str(channel) + ':SCAL ' + str(volts_per_div))
-            self.oscilloscope.write(
+            self.send_command(
                 ':CHAN' + str(channel) + ':OFFS ' + str(offset_divs*volts_per_div))
-            print("Turned on CH" + str(channel) + ", position is " + str(offset_divs) +
-                  " divisions from center, " + str(volts_per_div) + " volts/div, scope is " + str(probe) + "x")
+            self.logger.info("Turned on CH" + str(channel) + ", position is " + str(offset_divs) +
+                             " divisions from center, " + str(volts_per_div) + " volts/div, scope is " + str(probe) + "x")
         else:
-            self.oscilloscope.write(':CHAN' + str(channel) + ':DISP OFF')
-            print("Turned off channel " + str(channel))
+            self.send_command(':CHAN' + str(channel) + ':DISP OFF')
+            self.logger.info("Turned off channel " + str(channel))
 
     def get_scale(self, channel=1):
-        return float(self.oscilloscope.query(f':CHAN{channel}:SCAL?'))
+        return float(self.device.query(f':CHAN{channel}:SCAL?'))
 
     def get_y_inc(self):
-        return float(self.oscilloscope.query(f':WAV:YINC?'))
+        return float(self.device.query(':WAV:YINC?'))
 
     def get_y_origin(self):
-        return int(self.oscilloscope.query(f':WAV:YOR?'))
+        return int(self.device.query(':WAV:YOR?'))
 
     def get_y_ref(self):
-        return int(self.oscilloscope.query(f':WAV:YREF?'))
-
-    def val_and_unit_to_real_val(self, val_with_unit='1s'):
-        if isinstance(val_with_unit, float) or isinstance(val_with_unit, int):
-            return val_with_unit
-        number = int(re.search(r"([0-9]+)", val_with_unit).group(0))
-        unit = re.search(r"([a-zA-Z]+)", val_with_unit).group(0).lower()
-        if (unit == 's' or unit == 'v'):
-            real_val_no_units = number
-        elif (unit == 'ms' or unit == 'mv'):
-            real_val_no_units = number * 0.001
-        elif (unit == 'us' or unit == 'uv'):
-            real_val_no_units = number * 0.000001
-        elif (unit == 'ns' or unit == 'nv'):
-            real_val_no_units = number * 0.000000001
-        else:
-            real_val_no_units = number
-        return real_val_no_units
+        return int(self.device.query(':WAV:YREF?'))
 
     # remember to always use lowercase time_per_div units, the regex look for lowercase
     def setup_timebase(self, time_per_div='1ms', delay='1ms'):
-        time_per_div_real = self.val_and_unit_to_real_val(time_per_div)
-        self.oscilloscope.write(':TIM:MAIN:SCAL ' + str(time_per_div_real))
-        print("Timebase was set to " + str(time_per_div) + " per division")
-        delay_real = self.val_and_unit_to_real_val(delay)
-        self.oscilloscope.write(':TIM:MAIN:OFFS ' + str(delay_real))
+        time_per_div_real = val_and_unit_to_real_val(time_per_div)
+        self.send_command(':TIM:MAIN:SCAL ' + str(time_per_div_real))
+        self.logger.info("Timebase was set to " +
+                         str(time_per_div) + " per division")
+        delay_real = val_and_unit_to_real_val(delay)
+        self.send_command(':TIM:MAIN:OFFS ' + str(delay_real))
 
     # remember to always use lowercase level units, the regex look for lowercase
     def setup_trigger(self, channel=1, slope_pos=1, level='100mv'):
-        level_real = self.val_and_unit_to_real_val(level)
-        self.oscilloscope.write(':TRIG:EDG:SOUR CHAN' + str(channel))
+        level_real = val_and_unit_to_real_val(level)
+        self.send_command(':TRIG:EDG:SOUR CHAN' + str(channel))
         if (slope_pos == 0):
-            self.oscilloscope.write(':TRIG:EDG:SLOP NEG')
+            self.send_command(':TRIG:EDG:SLOP NEG')
         else:
-            self.oscilloscope.write(':TRIG:EDG:SLOP POS')
-        self.oscilloscope.write(':TRIG:EDG:LEV ' + str(level_real))
+            self.send_command(':TRIG:EDG:SLOP POS')
+        self.send_command(':TRIG:EDG:LEV ' + str(level_real))
         if (slope_pos == 1):
-            print("Triggering on CH" + str(channel) +
-                  " positive edge with level of " + level)
+            self.logger.info("Triggering on CH" + str(channel) +
+                             " positive edge with level of " + level)
         else:
-            print("Triggering on CH" + str(channel) +
-                  " negative edge with level of " + level)
+            self.logger.info("Triggering on CH" + str(channel) +
+                             " negative edge with level of " + level)
 
     # decode channel is either 1 or 2, only two decodes can be present at any time
     # use uppercase for encoding, valid choices are HEX, ASC, DEC, BIN, LINE
     # position_divs is the number of division (from bottom) to position the decode
     def setup_i2c_decode(self, decode_channel=1, on=1, sda_channel=1, scl_channel=2, encoding='HEX', position_divs=1.0):
         if (on == 0):
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':CONF:LINE OFF')
         else:
-            self.oscilloscope.write(':DEC' + str(decode_channel) + ':MODE IIC')
-            self.oscilloscope.write(':DEC' + str(decode_channel) + ':DISP ON')
-            self.oscilloscope.write(
+            self.send_command(':DEC' + str(decode_channel) + ':MODE IIC')
+            self.send_command(':DEC' + str(decode_channel) + ':DISP ON')
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':FORM ' + encoding)
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':POS ' + str(400-position_divs*50))
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':THRE AUTO')
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':CONF:LINE ON')
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':IIC:CLK CHAN' + str(scl_channel))
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':IIC:DATA CHAN' + str(sda_channel))
-            self.oscilloscope.write(
+            self.send_command(
                 ':DEC' + str(decode_channel) + ':IIC:ADDR RW')
 
     def single_trigger(self):
-        self.oscilloscope.write(':SING')
+        self.send_command(':SING')
         time.sleep(0.1)
 
     def force_trigger(self):
-        self.oscilloscope.write(':TFOR')
+        self.send_command(':TFOR')
         time.sleep(0.1)
 
     def run_trigger(self):
-        self.oscilloscope.write(':RUN')
+        self.send_command(':RUN')
         time.sleep(0.1)
 
     # only allowed values are 6e3, 6e4, 6e5, 6e6, 12e6 for single channels
@@ -304,18 +291,20 @@ class RigolDS1054Z:
     # only allowed values are 3e3, 3e4, 3e5, 3e6, 6e6  for 3 or 4 channels
     # the int conversion is needed for scientific notation values
     def setup_mem_depth(self, memory_depth=12e6):
-        self.oscilloscope.write(':ACQ:MDEP ' + str(int(memory_depth)))
-        print("Acquire memory depth set to {0} samples".format(memory_depth))
+        self.send_command(':ACQ:MDEP ' + str(int(memory_depth)))
+        self.logger.info(
+            "Acquire memory depth set to {0} samples".format(memory_depth))
 
     def get_waveform_data_ascii(self, channel=1, filename=''):
-        print('WARNING: Ascii method is 8 times slower, try using the method "get_waveform_data_uint8()" in combination with "scale_waveform_uint8()"')
-        self.oscilloscope.write(':STOP')
-        self.oscilloscope.write(f':WAV:SOUR CHAN{channel}')
+        self.logger.info(
+            'WARNING: Ascii method is 8 times slower, try using the method "get_waveform_data_uint8()" in combination with "scale_waveform_uint8()"')
+        self.send_command(':STOP')
+        self.send_command(f':WAV:SOUR CHAN{channel}')
         time.sleep(1)
-        self.oscilloscope.write(':WAV:MODE RAW')
-        self.oscilloscope.write(':WAV:FORM ASC')
-        self.oscilloscope.write(':ACQ:MDEP?')
-        fullreading = self.oscilloscope.read_raw()
+        self.send_command(':WAV:MODE RAW')
+        self.send_command(':WAV:FORM ASC')
+        self.send_command(':ACQ:MDEP?')
+        fullreading = self.read_response()
         readinglines = fullreading.splitlines()
         mdepth = int(readinglines[0])
         # transmission length can be higher (131072 instead of 15625) than rated in the documentation
@@ -328,10 +317,10 @@ class RigolDS1054Z:
             start = 1+i*131072
             stop = (1+i)*131072
 
-            self.oscilloscope.write(f':WAV:STAR {start}')
-            self.oscilloscope.write(f':WAV:STOP {stop}')
-            self.oscilloscope.write(':WAV:DATA?')
-            fullreading = self.oscilloscope.read_raw()
+            self.send_command(f':WAV:STAR {start}')
+            self.send_command(f':WAV:STOP {stop}')
+            self.send_command(':WAV:DATA?')
+            fullreading = self.read_response()
             array = fullreading[11:-1]
             datapoints = np.fromstring(array, sep=',')
             buffer[start-1:stop] = datapoints
@@ -339,13 +328,13 @@ class RigolDS1054Z:
         return buffer
 
     def get_waveform_data_uint8(self, channel=1, filename=''):
-        self.oscilloscope.write(':STOP')
-        self.oscilloscope.write(f':WAV:SOUR CHAN{channel}')
+        self.send_command(':STOP')
+        self.send_command(f':WAV:SOUR CHAN{channel}')
         time.sleep(1)
-        self.oscilloscope.write(':WAV:MODE RAW')
-        self.oscilloscope.write(':WAV:FORM BYTE')
-        self.oscilloscope.write(':ACQ:MDEP?')
-        fullreading = self.oscilloscope.read_raw()
+        self.send_command(':WAV:MODE RAW')
+        self.send_command(':WAV:FORM BYTE')
+        self.send_command(':ACQ:MDEP?')
+        fullreading = self.read_response()
         readinglines = fullreading.splitlines()
         mdepth = int(readinglines[0])
         num_reads = int((mdepth / 250000))
@@ -356,10 +345,10 @@ class RigolDS1054Z:
         for i in track(range(0, num_reads), description=f"Downloading Waveform Channel {channel}..."):
             start = 1+i*250000
             stop = (1+i)*250000
-            self.oscilloscope.write(f':WAV:STAR {start}')
-            self.oscilloscope.write(f':WAV:STOP {stop}')
-            self.oscilloscope.write(':WAV:DATA?')
-            fullreading = self.oscilloscope.read_raw()
+            self.send_command(f':WAV:STAR {start}')
+            self.send_command(f':WAV:STOP {stop}')
+            self.send_command(':WAV:DATA?')
+            fullreading = self.read_response()
             array = fullreading[11:-1]
             datapoints = np.frombuffer(array, dtype=np.uint8)
             buffer[start-1:stop] = datapoints
@@ -387,7 +376,7 @@ class RigolDS1054Z:
     #             str(channel) + "_" + \
     #             datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".csv"
     #     fid = open(filename, 'wb')
-    #     print("Started saving waveform data for channel " + str(channel) +
+    #     self.logger.info("Started saving waveform data for channel " + str(channel) +
     #           " " + str(mdepth) + " samples to filename " + '\"' + filename + '\"')
     #     for read_loop in range(0, num_reads):
     #         self.oscilloscope.write(':WAV:DATA?')
@@ -399,9 +388,9 @@ class RigolDS1054Z:
     #     fid.close()
 
     def write_scope_settings_to_file(self, filename=''):
-        self.oscilloscope.write(':SYST:SET?')
+        self.send_command(':SYST:SET?')
         # strip off first 11 bytes
-        raw_data = self.oscilloscope.read_raw()[11:]
+        raw_data = self.read_response()[11:]
 
         if (filename == ''):
             filename = "rigol_settings_" + \
@@ -409,12 +398,13 @@ class RigolDS1054Z:
         fid = open(filename, 'wb')
         fid.write(raw_data)
         fid.close()
-        print("Wrote oscilloscope settings to filename " + '\"' + filename + '\"')
+        self.logger.info(
+            "Wrote oscilloscope settings to filename " + '\"' + filename + '\"')
         time.sleep(5)
 
     def restore_scope_settings_from_file(self, filename=''):
         if (filename == ''):
-            print("ERROR: must specify filename\n")
+            self.logger.info("ERROR: must specify filename\n")
         else:
             with open(filename, mode='rb') as file:  # b is important -> binary
                 fileContent = file.read()
@@ -424,7 +414,29 @@ class RigolDS1054Z:
                 # convert to a list that write_binary_values can iterate
                 for x in range(0, len(fileContent)-1):
                     valList.append(ord(fileContent[x]))
-                self.oscilloscope.write_binary_values(
+                self.send_command_binary_values(
                     ':SYST:SET ', valList, datatype='B', is_big_endian=True)
-            print("Wrote oscilloscope settings to scope")
+            self.logger.info("Wrote oscilloscope settings to scope")
             time.sleep(8)
+
+
+class RigolDS1054Z(_RigolDS1000):
+    pass
+
+
+class RigolDS1074Z(_RigolDS1000):
+    pass
+
+
+class RigolDS1074Z_S(_RigolDS1000):
+    # TODO: Implement Signal Generator Commands
+    pass
+
+
+class RigolDS1104Z(_RigolDS1000):
+    pass
+
+
+class RigolDS1104Z_S(_RigolDS1000):
+    # TODO: Implement Signal Generator Commands
+    pass
